@@ -59,14 +59,17 @@ class mysqli extends \phpbb\db\driver\mysql_base
 			}
 		}
 
-		$this->db_connect_id = mysqli_init();
-
-		if (!@mysqli_real_connect($this->db_connect_id, $this->server, $this->user, $sqlpassword, $this->dbname, $port, $socket, MYSQLI_CLIENT_FOUND_ROWS))
+		if (!$this->db_connect_id = mysqli_init())
 		{
-			$this->db_connect_id = '';
+			$this->connect_error = 'Failed to initialize MySQLi object.';
+
+		}
+		else if (!@mysqli_real_connect($this->db_connect_id, $this->server, $this->user, $sqlpassword, $this->dbname, $port, $socket, MYSQLI_CLIENT_FOUND_ROWS))
+		{
+			$this->connect_error = 'Failed to establish a connection to the MySQL database engine. Please ensure MySQL server is running and the database configuration parameters are correct.';
 		}
 
-		if ($this->db_connect_id && $this->dbname != '')
+		if (!$this->connect_error && $this->db_connect_id && $this->dbname != '')
 		{
 			// Disable loading local files on client side
 			@mysqli_options($this->db_connect_id, MYSQLI_OPT_LOCAL_INFILE, false);
@@ -155,7 +158,9 @@ class mysqli extends \phpbb\db\driver\mysql_base
 		switch ($status)
 		{
 			case 'begin':
-				return @mysqli_autocommit($this->db_connect_id, false);
+				@mysqli_autocommit($this->db_connect_id, false);
+				$result = @mysqli_begin_transaction($this->db_connect_id);
+				return $result;
 			break;
 
 			case 'commit':
@@ -197,7 +202,16 @@ class mysqli extends \phpbb\db\driver\mysql_base
 
 			if ($this->query_result === false)
 			{
-				if (($this->query_result = @mysqli_query($this->db_connect_id, $query)) === false)
+				try
+				{
+					$this->query_result = @mysqli_query($this->db_connect_id, $query);
+				}
+				catch (\Error $e)
+				{
+					// Do nothing as SQL driver will report the error
+				}
+
+				if ($this->query_result === false)
 				{
 					$this->sql_error($query);
 				}
@@ -345,24 +359,17 @@ class mysqli extends \phpbb\db\driver\mysql_base
 	{
 		if ($this->db_connect_id)
 		{
-			$error = array(
-				'message'	=> @mysqli_error($this->db_connect_id),
-				'code'		=> @mysqli_errno($this->db_connect_id)
-			);
-		}
-		else if (function_exists('mysqli_connect_error'))
-		{
-			$error = array(
-				'message'	=> @mysqli_connect_error(),
-				'code'		=> @mysqli_connect_errno(),
-			);
+			$error = [
+				'message'	=> $this->db_connect_id->connect_error ?: $this->db_connect_id->error,
+				'code'		=> $this->db_connect_id->connect_errno ?: $this->db_connect_id->errno,
+			];
 		}
 		else
 		{
-			$error = array(
+			$error = [
 				'message'	=> $this->connect_error,
 				'code'		=> '',
-			);
+			];
 		}
 
 		return $error;
